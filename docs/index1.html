@@ -3,13 +3,132 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>FlyRank ML Internship — Demo Page (index1)</title>
+    <title>Early Warning for Content Cannibalization — FlyRank</title>
+    <meta name="description" content="Early Warning for Content Cannibalization: Predicting Traffic-Share Inversion Before It Fully Develops" />
+    <style>
+      body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; line-height:1.6; padding:24px; max-width:900px; margin:auto; color:#111 }
+      header h1 { margin:0 0 8px 0 }
+      header p { margin:0 0 16px 0; color:#555 }
+      pre.repo { background:#f6f8fa; padding:12px; overflow:auto }
+      h2 { margin-top:28px }
+      ul { margin-top:8px }
+      footer { margin-top:36px; color:#666; font-size:0.9rem }
+    </style>
   </head>
   <body>
+    <header>
+      <h1>Early Warning for Content Cannibalization: Predicting Traffic-Share Inversion Before It Fully Develops</h1>
+      <p>Author: Aditya — FlyRank ML Internship research</p>
+      <p class="repo">Repository: <a href="https://github.com/AdityaAAND/flyrank-ml-internship-starter">AdityAAND/flyrank-ml-internship-starter</a></p>
+    </header>
+
     <main>
-      <h1>FlyRank ML Internship — Demo Page (index1)</h1>
-      <p>This is an additional index file created to help debug GitHub Pages serving from the <code>/docs</code> folder.</p>
-      <p>Repository: <a href="https://github.com/AdityaAAND/flyrank-ml-internship-starter">AdityaAAND/flyrank-ml-internship-starter</a></p>
+      <section>
+        <h2>Abstract</h2>
+        <p>When two pages from the same site compete for the same search queries, one page can quietly gain traffic share at the other's expense, but teams often detect this content cannibalization only after the split is already visible. This project asks whether pre-existing signals such as query overlap, traffic-share trend, rank relationship, freshness difference, and CTR gap can identify page pairs at elevated risk before a full share inversion develops. Using the FlyRank ML Internship warehouse release, I built a time-aware, per-client modeling frame that keeps feature windows before each client's cutoff and label windows after that cutoff. A class-weighted LightGBM classifier outperformed a simple overlap-and-rank-divergence baseline on positive-class F1 (0.468 versus 0.005), while a dedicated leakage audit found and corrected a stale label-window cache before final results were stated. The output is a ranked, reason-coded watchlist for content teams to review, not an automatic publishing decision or a causal claim about search algorithms.</p>
+      </section>
+
+      <section>
+        <h2>Introduction / Problem Statement</h2>
+        <p>Large content sites can publish many pages that partially target the same search intent. When two pages from the same site compete for overlapping queries, one page may rise while another loses share, leaving the overall topic harder to manage even when individual page metrics do not obviously signal a problem. Most practical SEO workflows are reactive: the team notices the divergence after it has already affected clicks, rankings, or editorial focus.</p>
+
+        <p>The decision this paper supports is prioritization. A content team cannot manually audit every possible pair across hundreds or thousands of pages, so the useful output is a ranked shortlist of page pairs that deserve review first. In this framing, the model is not asked to prove that one page caused another page's decline. It is asked to identify observed historical patterns that look like elevated cannibalization risk and convert those patterns into an action queue.</p>
+      </section>
+
+      <section>
+        <h2>Data</h2>
+        <p>Release used: FlyRank ML Internship Warehouse, the gated Hugging Face warehouse release rather than the small teaching CSV.</p>
+        <p>Tables used:</p>
+        <ul>
+          <li>fact_content_daily_performance: daily GSC/GA4 performance metrics used for time-series features.</li>
+          <li>fact_content_query_90d: content-by-query mapping used to identify candidate competing pairs.</li>
+          <li>dim_clients: client-level history and access fields used to define per-client time cutoffs.</li>
+          <li>dim_content: content metadata used for freshness and age-gap features.</li>
+        </ul>
+
+        <p>The panel runs through 2026-06-30, but the split was defined per client instead of by one global calendar date. Each client's own midpoint between its GSC history start and the warehouse snapshot end determined the cutoff. This avoided giving long-history clients a very different train/test shape from short-history clients.</p>
+
+        <p>Rows were excluded when GSC data was not explicitly available, when clients lacked usable GSC access or a valid GSC start date, when candidate queries were too generic, or when a content item appeared only before or only after its client's cutoff. Candidate pairs were limited to same-client page pairs with Jaccard query overlap of at least 0.2 after excluding queries shared by more than ten content items. No client names, domains, raw URLs, private queries, credentials, or raw exports are included in this paper.</p>
+      </section>
+
+      <section>
+        <h2>Methodology</h2>
+        <p>The lane is freestyle: an early-warning analysis for content cannibalization. The unit of analysis is a same-client content pair with meaningful query overlap. The target is <code>is_cannibalization_label</code>, defined as a post-cutoff absolute impression-share shift of at least 15 percentage points between the two pages. This threshold is a stated design choice and produced a positive rate of 30.5% in the labeled pair frame.</p>
+
+        <p>All features were computed from the pre-cutoff window only:</p>
+        <ol>
+          <li>Jaccard query overlap between the two pages.</li>
+          <li>Impression-share trend slope before the cutoff.</li>
+          <li>Average pre-cutoff impression share.</li>
+          <li>Correlation between the pages' daily average positions.</li>
+          <li>Age and freshness gaps based on content metadata.</li>
+          <li>CTR gap difference relative to expected CTR for position tier.</li>
+        </ol>
+
+        <p>The baseline was intentionally simple: flag a pair when Jaccard overlap was greater than 0.5 and position correlation was below -0.3. This represents the obvious overlap-plus-rank-divergence heuristic a practitioner might try before using a learned model. The model was a class-weighted LightGBM binary classifier trained and tested with a stratified 80/20 split over the corrected pair frame.</p>
+
+        <p>Leakage checks were treated as part of the method, not as an afterthought. The feature-window audit confirmed zero feature rows on or after their client's cutoff. The first label-window audit found 3,210,571 rows dated before their client's cutoff because a stale cached label table had been restored. That table was rebuilt, rechecked to zero violations, and the labels, training frame, and model were recomputed from the corrected data. The corrected metrics were statistically similar to the earlier run, but the correction was necessary before making an honest claim.</p>
+      </section>
+
+      <section>
+        <h2>Results</h2>
+        <p>The LightGBM model improved the positive-class detection objective compared with the baseline rule. The baseline had higher overall accuracy because it predicted almost everything as stable, but that behavior is not useful for a watchlist whose purpose is to surface risky pairs.</p>
+
+        <p>Metric table:</p>
+        <ul>
+          <li>Precision, recall, F1, ROC-AUC, and accuracy are reported on the same test split for the model and baseline where applicable.</li>
+          <li>The positive class means a pair crossed the 15 percentage-point post-cutoff share-shift threshold.</li>
+        </ul>
+
+        <p>Confusion matrix on the test set showed 1,251 true positives and 1,110 false negatives among 2,361 positive pairs. That means the model caught about 53% of observed future risk cases and missed about 47%, so the result is useful but not complete. The main observed signal was that traffic-share and CTR-related features mattered more than query overlap alone.</p>
+
+        <p>Feature importance by LightGBM split count ranked average pre-cutoff impression share first, followed by CTR gap difference and impression-share trend slope. Jaccard overlap and position correlation still mattered, but they were not the top features. This is the central result: the simple SEO-intuition rule captured only part of the pattern, while the learned model used several weak signals together.</p>
+      </section>
+
+      <section>
+        <h2>Limitations & Honest Framing</h2>
+        <p>This work is a directional decision-support signal, not a certainty score. A high risk score means a pair resembles historical pairs that later developed a meaningful share shift; it does not guarantee that the pair will cannibalize in the future.</p>
+
+        <p>Recall is moderate, not high. The model missed nearly half of positive cases in the test split, especially cases where the early window did not already contain visible skew. The 15 percentage-point threshold is a modeling choice, so a different threshold would change the label distribution and metrics. Freshness and age-gap features come from a current content snapshot rather than full point-in-time content history, which creates a small disclosed risk that some metadata reflects updates after a client's cutoff.</p>
+
+        <p>No causal or algorithmic claim is made. The analysis describes observed association in the FlyRank internship dataset; it does not prove Google's ranking process, prove refresh impact, or prove that any individual intervention will fix a pair.</p>
+      </section>
+
+      <section>
+        <h2>Ranked Recommendations</h2>
+        <p>The practical output is a reason-coded watchlist for editorial review.</p>
+        <p>Risk tiers:</p>
+        <ul>
+          <li>High risk, score &gt;= 0.70: urgent review; consider whether the two pages should be consolidated, differentiated, internally linked more clearly, or assigned distinct search intents.</li>
+          <li>Medium risk, score 0.50 to 0.70: monitor and schedule review during the current content cycle.</li>
+          <li>Low risk, score below 0.50: no immediate cannibalization action, but keep normal performance monitoring.</li>
+        </ul>
+
+        <p>Recommended review order:</p>
+        <ol>
+          <li>Start with high-score pairs that combine high query overlap, shifting share, and a large CTR gap.</li>
+          <li>Check whether the pages target the same intent or whether they can be separated by purpose, funnel stage, or query class.</li>
+          <li>If intent is redundant, consider merge or consolidation.</li>
+          <li>If intent is distinct but unclear, rewrite metadata, headings, internal links, and content scope to reduce ambiguity.</li>
+          <li>Re-measure the pair after the next stable observation window rather than treating the model as a one-time verdict.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Reproducibility</h2>
+        <p>Repository: <a href="https://github.com/AdityaAAND/flyrank-ml-internship-starter">https://github.com/AdityaAAND/flyrank-ml-internship-starter</a></p>
+
+        <p>The weekly work and capstone work are stored under <code>work/</code> in the repository, including the notebook sequence for research framing, data contract, feature leakage checks, baseline scoring, modeling, validation audit, and action playbook. The warehouse data remains gated and is not redistributed. Credentials and raw exports are intentionally excluded from the repo. The final deployed-page URL should be written as the only line in <code>submission/paper_url.txt</code> after deployment.</p>
+      </section>
+
+      <section>
+        <h2>Acknowledgments & Data Credit</h2>
+        <p>Built on the FlyRank ML Internship dataset: <a href="https://flyrank.ai">https://flyrank.ai</a></p>
+      </section>
     </main>
+
+    <footer>
+      <p>Converted from markdown research paper file to docs/index1.html for GitHub Pages demo.</p>
+    </footer>
   </body>
 </html>
